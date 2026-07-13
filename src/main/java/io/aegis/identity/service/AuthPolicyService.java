@@ -17,9 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthPolicyService {
 
     private final AuthPolicyRepository policies;
+    private final AuditService auditService;
 
-    public AuthPolicyService(AuthPolicyRepository policies) {
+    public AuthPolicyService(AuthPolicyRepository policies, AuditService auditService) {
         this.policies = policies;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -40,7 +42,9 @@ public class AuthPolicyService {
         policy.setMfaRequired(incoming.isMfaRequired());
         policy.setSessionTtlMinutes(clamp(incoming.getSessionTtlMinutes(), 5, 1440));
         policy.touch();
-        return policies.save(policy);
+        AuthPolicy saved = policies.save(policy);
+        auditService.record(tenantId, "system", "POLICY_UPDATED", null, null);
+        return saved;
     }
 
     /** Enforces the tenant's password rules; throws {@link PasswordPolicyException} on violation. */

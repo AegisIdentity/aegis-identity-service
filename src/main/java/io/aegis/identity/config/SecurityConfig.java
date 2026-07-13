@@ -46,6 +46,13 @@ public class SecurityConfig {
                         // tenant admin reads/updates their own authentication policy
                         .requestMatchers("/api/v1/auth-policy")
                         .hasAuthority("SCOPE_tenant:admin")
+                        // tenant admin reads their own system log (audit events; tenant from token)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/system-log")
+                        .hasAuthority("SCOPE_tenant:admin")
+                        // self-service password change — a user changes their OWN password; must come
+                        // BEFORE the broad /api/v1/users/** write rule so it isn't captured by it
+                        .requestMatchers(HttpMethod.POST, "/api/v1/users/me/password")
+                        .authenticated()
                         // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")

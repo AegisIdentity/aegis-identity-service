@@ -6,6 +6,7 @@ import io.aegis.identity.service.AuthResult;
 import io.aegis.identity.service.UserService;
 import io.aegis.identity.web.UserDtos.AuthenticateRequest;
 import io.aegis.identity.web.UserDtos.AuthenticateResponse;
+import io.aegis.identity.web.UserDtos.ChangePasswordRequest;
 import io.aegis.identity.web.UserDtos.CreateUserRequest;
 import io.aegis.identity.web.UserDtos.ProvisionRequest;
 import io.aegis.identity.web.UserDtos.UserResponse;
@@ -13,6 +14,7 @@ import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * User API. Authorization is enforced by scope in {@code SecurityConfig}; the acting tenant for
@@ -45,6 +48,21 @@ public class UserController {
                 request.password());
         return ResponseEntity.created(URI.create("/api/v1/users/" + user.getId()))
                 .body(UserResponse.from(user));
+    }
+
+    /**
+     * Self-service password change: a user changes their OWN password. The acting account is resolved
+     * from the caller's token (subject / preferred_username within the tenant) — never from the body —
+     * so a caller can only ever change their own credential. Returns 204 on success.
+     */
+    @PostMapping("/api/v1/users/me/password")
+    public ResponseEntity<Void> changeOwnPassword(@AuthenticationPrincipal Jwt caller,
+                                                  @Valid @RequestBody ChangePasswordRequest request) {
+        String tenantId = callerTenant(caller);
+        userService.changeOwnPassword(tenantId, caller.getSubject(),
+                caller.getClaimAsString("preferred_username"),
+                request.currentPassword(), request.newPassword());
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/api/v1/users")
@@ -93,6 +111,15 @@ public class UserController {
         String tenant = jwt.getClaimAsString("tenant");
         if (tenant == null || tenant.isBlank()) {
             throw new IllegalArgumentException("token is missing the required 'tenant' claim");
+        }
+        return tenant;
+    }
+
+    /** Tenant from a user-facing caller token; a blank tenant is a 403 (the token cannot act anywhere). */
+    private static String callerTenant(Jwt caller) {
+        String tenant = caller.getClaimAsString("tenant");
+        if (tenant == null || tenant.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "token carries no tenant");
         }
         return tenant;
     }

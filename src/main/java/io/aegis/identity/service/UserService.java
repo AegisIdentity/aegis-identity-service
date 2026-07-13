@@ -5,10 +5,12 @@ import io.aegis.identity.domain.AppUserRepository;
 import io.aegis.identity.domain.AuthPolicy;
 import io.aegis.identity.domain.UserStatus;
 import io.aegis.identity.service.UserExceptions.DuplicateUserException;
+import io.aegis.identity.service.UserExceptions.IncorrectPasswordException;
 import io.aegis.identity.service.UserExceptions.UserNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
@@ -28,11 +30,14 @@ public class UserService {
     private final AppUserRepository users;
     private final PasswordHasher hasher;
     private final AuthPolicyService authPolicyService;
+    private final AuditService auditService;
 
-    public UserService(AppUserRepository users, PasswordHasher hasher, AuthPolicyService authPolicyService) {
+    public UserService(AppUserRepository users, PasswordHasher hasher, AuthPolicyService authPolicyService,
+                       AuditService auditService) {
         this.users = users;
         this.hasher = hasher;
         this.authPolicyService = authPolicyService;
+        this.auditService = auditService;
     }
 
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]{0,62}$");
@@ -90,7 +95,9 @@ public class UserService {
             throw new DuplicateUserException("email already exists in tenant");
         }
         AppUser user = new AppUser(UUID.randomUUID(), tenantId, username, email, hasher.hash(rawPassword));
-        return users.save(user);
+        AppUser saved = users.save(user);
+        auditService.record(tenantId, "system", "USER_CREATED", username, null);
+        return saved;
     }
 
     @Transactional(readOnly = true)
@@ -114,12 +121,78 @@ public class UserService {
             user.recordSuccessfulLogin(); // clears failed-attempt / lockout counters
         }
         user.setStatus(status); // apply the requested status (works from DISABLED or LOCKED)
-        return users.save(user);
+        AppUser saved = users.save(user);
+        auditService.record(tenantId, "system",
+                status == UserStatus.DISABLED ? "USER_DISABLED" : "USER_ENABLED",
+                user.getUsername(), null);
+        return saved;
     }
 
     @Transactional
     public void deleteUser(String tenantId, UUID id) {
-        users.delete(getUser(tenantId, id));
+        AppUser user = getUser(tenantId, id);
+        users.delete(user);
+        auditService.record(tenantId, "system", "USER_DELETED", user.getUsername(), null);
+    }
+
+    /**
+     * Self-service password change. Resolves the caller's own account within the tenant (by id when the
+     * caller's subject is a UUID, otherwise by username), verifies the {@code currentPassword} against the
+     * stored Argon2 hash, enforces the tenant password policy on {@code newPassword}, and persists the new
+     * credential. Never reveals anything beyond a generic "current password is incorrect" on a mismatch.
+     *
+     * @param subjectOrUsername the token subject (a UUID in production) or, failing that, the username
+     */
+    @Transactional
+    public void changeOwnPassword(String tenantId, String subjectOrUsername, String preferredUsername,
+                                  String currentPassword, String newPassword) {
+        requireTenant(tenantId);
+        AppUser user = resolveSelf(tenantId, subjectOrUsername, preferredUsername);
+        if (!hasher.matches(currentPassword, user.getPasswordHash())) {
+            throw new IncorrectPasswordException("current password is incorrect");
+        }
+        authPolicyService.validatePassword(tenantId, newPassword); // enforce the tenant's password policy
+        user.setPasswordHash(hasher.hash(newPassword));
+        users.save(user);
+        auditService.record(tenantId, user.getUsername(), "PASSWORD_CHANGED", user.getUsername(), null);
+    }
+
+    /**
+     * Resolves the caller's own {@link AppUser} within the tenant. Prefers a lookup by id when the token
+     * subject is a UUID (production shape); falls back to {@code preferredUsername}, then to the raw
+     * subject as a username. All lookups are tenant-scoped, so a caller can never reach another tenant.
+     */
+    private AppUser resolveSelf(String tenantId, String subjectOrUsername, String preferredUsername) {
+        if (subjectOrUsername != null && !subjectOrUsername.isBlank()) {
+            Optional<UUID> asUuid = tryParseUuid(subjectOrUsername);
+            if (asUuid.isPresent()) {
+                Optional<AppUser> byId = users.findByTenantIdAndId(tenantId, asUuid.get());
+                if (byId.isPresent()) {
+                    return byId.get();
+                }
+            }
+        }
+        if (preferredUsername != null && !preferredUsername.isBlank()) {
+            Optional<AppUser> byPreferred = users.findByTenantIdAndUsername(tenantId, preferredUsername);
+            if (byPreferred.isPresent()) {
+                return byPreferred.get();
+            }
+        }
+        if (subjectOrUsername != null && !subjectOrUsername.isBlank()) {
+            Optional<AppUser> bySubject = users.findByTenantIdAndUsername(tenantId, subjectOrUsername);
+            if (bySubject.isPresent()) {
+                return bySubject.get();
+            }
+        }
+        throw new UserNotFoundException("no such user in tenant");
+    }
+
+    private static Optional<UUID> tryParseUuid(String value) {
+        try {
+            return Optional.of(UUID.fromString(value));
+        } catch (IllegalArgumentException ex) {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -133,27 +206,34 @@ public class UserService {
         Instant now = Instant.now();
         var maybeUser = users.findByTenantIdAndUsername(tenantId, username);
         if (maybeUser.isEmpty()) {
+            auditService.record(tenantId, username, "AUTH_FAILURE", username, "bad credentials");
             return AuthResult.of(AuthOutcome.BAD_CREDENTIALS);
         }
         AppUser user = maybeUser.get();
 
         if (user.getStatus() == UserStatus.DISABLED) {
+            auditService.record(tenantId, username, "AUTH_FAILURE", username, "disabled");
             return AuthResult.of(AuthOutcome.DISABLED);
         }
         if (user.isCurrentlyLocked(now)) {
+            auditService.record(tenantId, username, "AUTH_FAILURE", username, "locked");
             return AuthResult.of(AuthOutcome.LOCKED);
         }
 
         if (hasher.matches(rawPassword, user.getPasswordHash())) {
             user.recordSuccessfulLogin();
             users.save(user);
+            auditService.record(tenantId, username, "AUTH_SUCCESS", username, null);
             return AuthResult.success(user.getId());
         }
 
         user.recordFailedLogin(policy.getLockoutThreshold(),
                 Duration.ofMinutes(policy.getLockoutDurationMinutes()), now);
         users.save(user);
-        return AuthResult.of(user.isCurrentlyLocked(now) ? AuthOutcome.LOCKED : AuthOutcome.BAD_CREDENTIALS);
+        boolean nowLocked = user.isCurrentlyLocked(now);
+        auditService.record(tenantId, username, "AUTH_FAILURE", username,
+                nowLocked ? "locked" : "bad credentials");
+        return AuthResult.of(nowLocked ? AuthOutcome.LOCKED : AuthOutcome.BAD_CREDENTIALS);
     }
 
     private static void requireTenant(String tenantId) {

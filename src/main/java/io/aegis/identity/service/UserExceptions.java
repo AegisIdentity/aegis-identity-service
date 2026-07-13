@@ -37,4 +37,14 @@ public final class UserExceptions {
             super(message);
         }
     }
+
+    /**
+     * The supplied current password did not match the stored credential during a self-service change.
+     * Deliberately carries only a generic message and reveals nothing else about the account.
+     */
+    public static class IncorrectPasswordException extends RuntimeException {
+        public IncorrectPasswordException(String message) {
+            super(message);
+        }
+    }
 }

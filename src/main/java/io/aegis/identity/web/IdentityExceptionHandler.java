@@ -3,6 +3,7 @@ package io.aegis.identity.web;
 import io.aegis.identity.service.GroupService.DuplicateGroupException;
 import io.aegis.identity.service.GroupService.GroupNotFoundException;
 import io.aegis.identity.service.UserExceptions.DuplicateUserException;
+import io.aegis.identity.service.UserExceptions.IncorrectPasswordException;
 import io.aegis.identity.service.UserExceptions.PasswordPolicyException;
 import io.aegis.identity.service.UserExceptions.SignupNotAvailableException;
 import io.aegis.identity.service.UserExceptions.UserNotFoundException;
@@ -33,6 +34,11 @@ public class IdentityExceptionHandler {
 
     @ExceptionHandler(PasswordPolicyException.class)
     public ProblemDetail handlePasswordPolicy(PasswordPolicyException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(IncorrectPasswordException.class)
+    public ProblemDetail handleIncorrectPassword(IncorrectPasswordException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

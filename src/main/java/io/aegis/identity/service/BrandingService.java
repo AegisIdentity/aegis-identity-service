@@ -14,9 +14,11 @@ public class BrandingService {
     private static final Pattern HEX_COLOR = Pattern.compile("^#[0-9a-fA-F]{6}$");
 
     private final TenantBrandingRepository branding;
+    private final AuditService auditService;
 
-    public BrandingService(TenantBrandingRepository branding) {
+    public BrandingService(TenantBrandingRepository branding, AuditService auditService) {
         this.branding = branding;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -41,6 +43,8 @@ public class BrandingService {
         }
         b.setPrimaryColor(incoming.getPrimaryColor());
         b.touch();
-        return branding.save(b);
+        TenantBranding saved = branding.save(b);
+        auditService.record(tenantId, "system", "BRANDING_UPDATED", null, null);
+        return saved;
     }
 }

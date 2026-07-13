@@ -19,6 +19,12 @@ public final class UserDtos {
             @NotBlank @Size(min = 8, max = 200) String password) {
     }
 
+    /** Self-service password change: the caller's own account is taken from the token, never the body. */
+    public record ChangePasswordRequest(
+            @NotBlank @Size(max = 200) String currentPassword,
+            @NotBlank @Size(min = 8, max = 200) String newPassword) {
+    }
+
     public record UserResponse(UUID id, String tenantId, String username, String email, String status) {
         public static UserResponse from(AppUser u) {
             return new UserResponse(u.getId(), u.getTenantId(), u.getUsername(), u.getEmail(),

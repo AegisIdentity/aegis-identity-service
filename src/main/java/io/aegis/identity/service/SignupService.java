@@ -21,10 +21,13 @@ public class SignupService {
 
     private final TenantSignupPolicyRepository policies;
     private final UserService userService;
+    private final AuditService auditService;
 
-    public SignupService(TenantSignupPolicyRepository policies, UserService userService) {
+    public SignupService(TenantSignupPolicyRepository policies, UserService userService,
+                         AuditService auditService) {
         this.policies = policies;
         this.userService = userService;
+        this.auditService = auditService;
     }
 
     @Transactional(readOnly = true)
@@ -54,6 +57,8 @@ public class SignupService {
         if (!isEnabled(tenantId)) {
             throw new SignupNotAvailableException("self-service sign-up is not available for this organization");
         }
-        return userService.createUser(tenantId, username, email, rawPassword);
+        AppUser user = userService.createUser(tenantId, username, email, rawPassword);
+        auditService.record(tenantId, username, "SIGNUP", username, "self-service sign-up");
+        return user;
     }
 }
