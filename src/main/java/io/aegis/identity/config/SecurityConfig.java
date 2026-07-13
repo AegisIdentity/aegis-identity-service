@@ -32,6 +32,14 @@ public class SecurityConfig {
                         // public self-service sign-up — a tenant's customer with no token; the service
                         // itself gates this on the tenant having opted in (default: closed)
                         .requestMatchers(HttpMethod.POST, "/api/v1/signup").permitAll()
+                        // tenant admin reads their own branding (tenant from token)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/branding")
+                        .hasAuthority("SCOPE_tenant:admin")
+                        // public branding read by tenant — the login page renders it before authentication
+                        .requestMatchers(HttpMethod.GET, "/api/v1/branding/**").permitAll()
+                        // tenant admin sets their own branding
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/branding")
+                        .hasAuthority("SCOPE_tenant:admin")
                         // tenant admin toggles/reads their own self-service sign-up policy
                         .requestMatchers("/api/v1/signup-policy")
                         .hasAuthority("SCOPE_tenant:admin")

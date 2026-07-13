@@ -215,6 +215,41 @@ class IdentityServiceIT {
     }
 
     @Test
+    void branding_is_public_to_read_and_tenant_admin_to_write() throws Exception {
+        // public GET returns defaults (no token needed — the login page reads it pre-auth)
+        mockMvc.perform(get("/api/v1/branding/brandco"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productName").value("Aegis Identity"));
+
+        String body = """
+                {"productName":"Acme SSO","signInHeading":"Welcome to Acme",
+                 "signInSubtitle":"Sign in to continue","primaryColor":"#ff8800"}""";
+
+        // write is scope-gated
+        mockMvc.perform(put("/api/v1/branding").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(put("/api/v1/branding").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("brandco", "admin", "identity:users:read")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/branding").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("brandco", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.productName").value("Acme SSO"))
+                .andExpect(jsonPath("$.primaryColor").value("#ff8800"));
+
+        // public GET now reflects the tenant's branding
+        mockMvc.perform(get("/api/v1/branding/brandco"))
+                .andExpect(jsonPath("$.signInHeading").value("Welcome to Acme"));
+
+        // an invalid color is rejected
+        mockMvc.perform(put("/api/v1/branding").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"productName":"X","signInHeading":"H","signInSubtitle":"S","primaryColor":"red"}""")
+                        .with(jwtForTenant("brandco", "admin", "tenant:admin")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void auth_policy_is_scope_gated_and_password_rules_are_enforced() throws Exception {
         // scope-gated: no token -> 401, wrong scope -> 403, defaults returned with tenant:admin
         mockMvc.perform(get("/api/v1/auth-policy")).andExpect(status().isUnauthorized());
