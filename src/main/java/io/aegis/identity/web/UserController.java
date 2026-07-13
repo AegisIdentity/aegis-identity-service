@@ -1,6 +1,7 @@
 package io.aegis.identity.web;
 
 import io.aegis.identity.domain.AppUser;
+import io.aegis.identity.domain.UserStatus;
 import io.aegis.identity.service.AuthResult;
 import io.aegis.identity.service.UserService;
 import io.aegis.identity.web.UserDtos.AuthenticateRequest;
@@ -9,10 +10,12 @@ import io.aegis.identity.web.UserDtos.CreateUserRequest;
 import io.aegis.identity.web.UserDtos.UserResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,9 +46,30 @@ public class UserController {
                 .body(UserResponse.from(user));
     }
 
+    @GetMapping("/api/v1/users")
+    public List<UserResponse> list(@AuthenticationPrincipal Jwt jwt) {
+        return userService.listUsers(tenantOf(jwt)).stream().map(UserResponse::from).toList();
+    }
+
     @GetMapping("/api/v1/users/{id}")
     public UserResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return UserResponse.from(userService.getUser(tenantOf(jwt), id));
+    }
+
+    @PostMapping("/api/v1/users/{id}/disable")
+    public UserResponse disable(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return UserResponse.from(userService.setStatus(tenantOf(jwt), id, UserStatus.DISABLED));
+    }
+
+    @PostMapping("/api/v1/users/{id}/enable")
+    public UserResponse enable(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return UserResponse.from(userService.setStatus(tenantOf(jwt), id, UserStatus.ACTIVE));
+    }
+
+    @DeleteMapping("/api/v1/users/{id}")
+    public ResponseEntity<Void> delete(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        userService.deleteUser(tenantOf(jwt), id);
+        return ResponseEntity.noContent().build();
     }
 
     /** Credential verification for the authorization-server. Tenant comes from the request body. */

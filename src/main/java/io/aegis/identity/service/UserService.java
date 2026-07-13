@@ -7,6 +7,7 @@ import io.aegis.identity.service.UserExceptions.DuplicateUserException;
 import io.aegis.identity.service.UserExceptions.UserNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -56,6 +57,28 @@ public class UserService {
         requireTenant(tenantId);
         return users.findByTenantIdAndId(tenantId, id)
                 .orElseThrow(() -> new UserNotFoundException("no such user in tenant"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<AppUser> listUsers(String tenantId) {
+        requireTenant(tenantId);
+        return users.findByTenantIdOrderByUsername(tenantId);
+    }
+
+    /** Enable (ACTIVE, clearing any lockout) or disable a user. */
+    @Transactional
+    public AppUser setStatus(String tenantId, UUID id, UserStatus status) {
+        AppUser user = getUser(tenantId, id);
+        if (status == UserStatus.ACTIVE) {
+            user.recordSuccessfulLogin(); // clears failed-attempt / lockout counters
+        }
+        user.setStatus(status); // apply the requested status (works from DISABLED or LOCKED)
+        return users.save(user);
+    }
+
+    @Transactional
+    public void deleteUser(String tenantId, UUID id) {
+        users.delete(getUser(tenantId, id));
     }
 
     /**

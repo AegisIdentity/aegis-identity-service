@@ -1,5 +1,7 @@
 package io.aegis.identity.web;
 
+import io.aegis.identity.service.GroupService.DuplicateGroupException;
+import io.aegis.identity.service.GroupService.GroupNotFoundException;
 import io.aegis.identity.service.UserExceptions.DuplicateUserException;
 import io.aegis.identity.service.UserExceptions.UserNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -19,6 +21,16 @@ public class IdentityExceptionHandler {
 
     @ExceptionHandler(UserNotFoundException.class)
     public ProblemDetail handleNotFound(UserNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(DuplicateGroupException.class)
+    public ProblemDetail handleDuplicateGroup(DuplicateGroupException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(GroupNotFoundException.class)
+    public ProblemDetail handleGroupNotFound(GroupNotFoundException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 }

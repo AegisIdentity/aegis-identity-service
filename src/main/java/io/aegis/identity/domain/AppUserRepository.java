@@ -1,5 +1,6 @@
 package io.aegis.identity.domain;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,6 +11,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * (see ARCHITECTURE.md §5.2). A cross-tenant read is a Sev-1, so the API makes it hard to write one.
  */
 public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
+
+    List<AppUser> findByTenantIdOrderByUsername(String tenantId);
 
     Optional<AppUser> findByTenantIdAndUsername(String tenantId, String username);
 

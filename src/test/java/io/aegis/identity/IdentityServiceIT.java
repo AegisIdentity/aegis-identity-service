@@ -4,6 +4,7 @@ import static io.aegis.commons.testing.AegisJwtTest.jwtForTenant;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -120,5 +121,72 @@ class IdentityServiceIT {
                         .with(jwtForTenant("tenant-a", "authz-server", "identity:users:authenticate")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.outcome").value("SUCCESS"));
+    }
+
+    @Test
+    void users_can_be_listed_disabled_enabled_and_deleted() throws Exception {
+        var user = userService.createUser("tenant-a", "frank", "frank@a.example", "Sup3rSecret!");
+
+        mockMvc.perform(get("/api/v1/users").with(jwtForTenant("tenant-a", "svc", "identity:users:read")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.username=='frank')]").exists());
+
+        mockMvc.perform(post("/api/v1/users/" + user.getId() + "/disable")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:write")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("DISABLED"));
+
+        mockMvc.perform(post("/api/v1/users/" + user.getId() + "/enable")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:write")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        mockMvc.perform(delete("/api/v1/users/" + user.getId())
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:write")))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/users/" + user.getId())
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:read")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void groups_crud_and_membership_with_scope_enforcement() throws Exception {
+        var user = userService.createUser("tenant-a", "grace", "grace@a.example", "Sup3rSecret!");
+
+        // read scope cannot create a group
+        mockMvc.perform(post("/api/v1/groups").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"X\"}")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:read")))
+                .andExpect(status().isForbidden());
+
+        // create with write scope
+        var created = mockMvc.perform(post("/api/v1/groups").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Engineers\",\"description\":\"Eng team\"}")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:write")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.name").value("Engineers"))
+                .andReturn();
+        String groupId = com.jayway.jsonpath.JsonPath.read(
+                created.getResponse().getContentAsString(), "$.id");
+
+        // add + list member
+        mockMvc.perform(post("/api/v1/groups/" + groupId + "/members")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"" + user.getId() + "\"}")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:write")))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/v1/groups/" + groupId + "/members")
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:read")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].username").value("grace"));
+        mockMvc.perform(get("/api/v1/groups/" + groupId)
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:read")))
+                .andExpect(jsonPath("$.memberCount").value(1));
+
+        // remove member
+        mockMvc.perform(delete("/api/v1/groups/" + groupId + "/members/" + user.getId())
+                        .with(jwtForTenant("tenant-a", "svc", "identity:groups:write")))
+                .andExpect(status().isNoContent());
+
+        // unauthenticated is denied
+        mockMvc.perform(get("/api/v1/groups")).andExpect(status().isUnauthorized());
     }
 }

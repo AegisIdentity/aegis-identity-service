@@ -27,12 +27,20 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")
-                        .requestMatchers(HttpMethod.POST, "/api/v1/users")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/users", "/api/v1/users/**")
                         .hasAuthority("SCOPE_identity:users:write")
-                        .requestMatchers(HttpMethod.GET, "/api/v1/users/**")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/users/**")
+                        .hasAuthority("SCOPE_identity:users:write")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users", "/api/v1/users/**")
                         .hasAuthority("SCOPE_identity:users:read")
+                        // groups (GET = read; all other methods = write)
+                        .requestMatchers(HttpMethod.GET, "/api/v1/groups", "/api/v1/groups/**")
+                        .hasAuthority("SCOPE_identity:groups:read")
+                        .requestMatchers("/api/v1/groups", "/api/v1/groups/**")
+                        .hasAuthority("SCOPE_identity:groups:write")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
         return http.build();
