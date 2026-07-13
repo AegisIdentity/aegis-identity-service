@@ -34,6 +34,13 @@ public final class UserDtos {
             @NotBlank String password) {
     }
 
+    /** JIT provisioning for a federated login: find-or-create by email. Called by the authorization-server. */
+    public record ProvisionRequest(
+            @NotBlank String tenantId,
+            @NotBlank @Email @Size(max = 320) String email,
+            @Size(max = 128) String username) {
+    }
+
     public record AuthenticateResponse(AuthOutcome outcome, UUID userId) {
     }
 }

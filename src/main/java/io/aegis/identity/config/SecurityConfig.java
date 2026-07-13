@@ -38,6 +38,9 @@ public class SecurityConfig {
                         // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")
+                        // JIT provisioning for federated logins (authorization-server service token)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/users:provision")
+                        .hasAuthority("SCOPE_identity:users:provision")
                         .requestMatchers(HttpMethod.POST, "/api/v1/users", "/api/v1/users/**")
                         .hasAuthority("SCOPE_identity:users:write")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/users/**")

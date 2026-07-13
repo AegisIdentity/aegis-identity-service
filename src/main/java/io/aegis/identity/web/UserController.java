@@ -7,6 +7,7 @@ import io.aegis.identity.service.UserService;
 import io.aegis.identity.web.UserDtos.AuthenticateRequest;
 import io.aegis.identity.web.UserDtos.AuthenticateResponse;
 import io.aegis.identity.web.UserDtos.CreateUserRequest;
+import io.aegis.identity.web.UserDtos.ProvisionRequest;
 import io.aegis.identity.web.UserDtos.UserResponse;
 import jakarta.validation.Valid;
 import java.net.URI;
@@ -78,6 +79,14 @@ public class UserController {
         AuthResult result = userService.authenticate(request.tenantId(), request.username(),
                 request.password());
         return new AuthenticateResponse(result.outcome(), result.userId());
+    }
+
+    /** JIT provisioning for a federated login (find-or-create by email). Called by the authorization-server;
+     * tenant comes from the body because the AS knows it. */
+    @PostMapping("/api/v1/users:provision")
+    public UserResponse provision(@Valid @RequestBody ProvisionRequest request) {
+        return UserResponse.from(userService.provisionFederatedUser(
+                request.tenantId(), request.email(), request.username()));
     }
 
     private static String tenantOf(Jwt jwt) {

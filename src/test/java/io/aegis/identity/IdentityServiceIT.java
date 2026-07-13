@@ -215,6 +215,36 @@ class IdentityServiceIT {
     }
 
     @Test
+    void federated_provisioning_is_find_or_create_by_email_and_scope_gated() throws Exception {
+        String body = """
+                {"tenantId":"fed","email":"jane@fed.example","username":"jane"}""";
+
+        // no token -> 401; wrong scope -> 403
+        mockMvc.perform(post("/api/v1/users:provision").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/v1/users:provision").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("fed", "as", "identity:users:read")))
+                .andExpect(status().isForbidden());
+
+        // provision scope -> creates the user
+        String first = mockMvc.perform(post("/api/v1/users:provision")
+                        .contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("fed", "as", "identity:users:provision")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value("jane@fed.example"))
+                .andReturn().getResponse().getContentAsString();
+        String id = com.jayway.jsonpath.JsonPath.read(first, "$.id");
+
+        // calling again with the same email returns the SAME user (idempotent, no duplicate)
+        mockMvc.perform(post("/api/v1/users:provision").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"tenantId":"fed","email":"jane@fed.example","username":"different"}""")
+                        .with(jwtForTenant("fed", "as", "identity:users:provision")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
     void self_service_signup_is_closed_by_default_and_opens_after_admin_opts_in() throws Exception {
         String signup = """
                 {"tenantSlug":"signupco","username":"cust1","email":"cust1@x.example","password":"Sup3rSecret!"}""";

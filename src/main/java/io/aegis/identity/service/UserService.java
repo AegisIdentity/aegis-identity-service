@@ -59,6 +59,31 @@ public class UserService {
         return createUser(tenantSlug, username, email, rawPassword);
     }
 
+    /**
+     * Find-or-create a user for a federated (social/OIDC/SAML) login. Matching is by email — the stable
+     * identifier across providers — so a returning user is linked to their existing account rather than
+     * duplicated. A newly provisioned user gets an unusable random password (they authenticate through
+     * the external IdP, never by password here).
+     */
+    @Transactional
+    public AppUser provisionFederatedUser(String tenantId, String email, String preferredUsername) {
+        requireTenant(tenantId);
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("email is required to provision a federated user");
+        }
+        return users.findByTenantIdAndEmail(tenantId, email).orElseGet(() -> {
+            String username = (preferredUsername == null || preferredUsername.isBlank())
+                    ? email : preferredUsername;
+            if (users.existsByTenantIdAndUsername(tenantId, username)) {
+                username = email; // fall back to the (unique) email if the preferred handle is taken
+            }
+            String unusablePassword = UUID.randomUUID() + ":" + UUID.randomUUID();
+            AppUser user = new AppUser(UUID.randomUUID(), tenantId, username, email,
+                    hasher.hash(unusablePassword));
+            return users.save(user);
+        });
+    }
+
     @Transactional
     public AppUser createUser(String tenantId, String username, String email, String rawPassword) {
         requireTenant(tenantId);
