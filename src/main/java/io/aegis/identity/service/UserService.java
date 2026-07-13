@@ -2,6 +2,7 @@ package io.aegis.identity.service;
 
 import io.aegis.identity.domain.AppUser;
 import io.aegis.identity.domain.AppUserRepository;
+import io.aegis.identity.domain.AuthPolicy;
 import io.aegis.identity.domain.UserStatus;
 import io.aegis.identity.service.UserExceptions.DuplicateUserException;
 import io.aegis.identity.service.UserExceptions.UserNotFoundException;
@@ -10,7 +11,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,17 +27,12 @@ public class UserService {
 
     private final AppUserRepository users;
     private final PasswordHasher hasher;
-    private final int lockThreshold;
-    private final Duration lockDuration;
+    private final AuthPolicyService authPolicyService;
 
-    public UserService(AppUserRepository users,
-                       PasswordHasher hasher,
-                       @Value("${aegis.identity.lockout.threshold:5}") int lockThreshold,
-                       @Value("${aegis.identity.lockout.duration:PT15M}") Duration lockDuration) {
+    public UserService(AppUserRepository users, PasswordHasher hasher, AuthPolicyService authPolicyService) {
         this.users = users;
         this.hasher = hasher;
-        this.lockThreshold = lockThreshold;
-        this.lockDuration = lockDuration;
+        this.authPolicyService = authPolicyService;
     }
 
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]{0,62}$");
@@ -87,6 +82,7 @@ public class UserService {
     @Transactional
     public AppUser createUser(String tenantId, String username, String email, String rawPassword) {
         requireTenant(tenantId);
+        authPolicyService.validatePassword(tenantId, rawPassword); // enforce the tenant's password policy
         if (users.existsByTenantIdAndUsername(tenantId, username)) {
             throw new DuplicateUserException("username already exists in tenant");
         }
@@ -133,6 +129,7 @@ public class UserService {
     @Transactional
     public AuthResult authenticate(String tenantId, String username, String rawPassword) {
         requireTenant(tenantId);
+        AuthPolicy policy = authPolicyService.effectivePolicy(tenantId);
         Instant now = Instant.now();
         var maybeUser = users.findByTenantIdAndUsername(tenantId, username);
         if (maybeUser.isEmpty()) {
@@ -153,7 +150,8 @@ public class UserService {
             return AuthResult.success(user.getId());
         }
 
-        user.recordFailedLogin(lockThreshold, lockDuration, now);
+        user.recordFailedLogin(policy.getLockoutThreshold(),
+                Duration.ofMinutes(policy.getLockoutDurationMinutes()), now);
         users.save(user);
         return AuthResult.of(user.isCurrentlyLocked(now) ? AuthOutcome.LOCKED : AuthOutcome.BAD_CREDENTIALS);
     }

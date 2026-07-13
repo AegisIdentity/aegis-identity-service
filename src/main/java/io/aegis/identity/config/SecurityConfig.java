@@ -35,6 +35,9 @@ public class SecurityConfig {
                         // tenant admin toggles/reads their own self-service sign-up policy
                         .requestMatchers("/api/v1/signup-policy")
                         .hasAuthority("SCOPE_tenant:admin")
+                        // tenant admin reads/updates their own authentication policy
+                        .requestMatchers("/api/v1/auth-policy")
+                        .hasAuthority("SCOPE_tenant:admin")
                         // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")

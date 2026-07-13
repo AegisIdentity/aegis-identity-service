@@ -215,6 +215,42 @@ class IdentityServiceIT {
     }
 
     @Test
+    void auth_policy_is_scope_gated_and_password_rules_are_enforced() throws Exception {
+        // scope-gated: no token -> 401, wrong scope -> 403, defaults returned with tenant:admin
+        mockMvc.perform(get("/api/v1/auth-policy")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/auth-policy").with(jwtForTenant("polco", "admin", "identity:users:read")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/auth-policy").with(jwtForTenant("polco", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.passwordMinLength").value(8));
+
+        // tighten: min length 12 + require a digit
+        mockMvc.perform(put("/api/v1/auth-policy").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"passwordMinLength":12,"passwordRequireUppercase":false,
+                                 "passwordRequireLowercase":false,"passwordRequireDigit":true,
+                                 "passwordRequireSymbol":false,"lockoutThreshold":5,
+                                 "lockoutDurationMinutes":15,"mfaRequired":false,"sessionTtlMinutes":60}""")
+                        .with(jwtForTenant("polco", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.passwordRequireDigit").value(true));
+
+        // a weak password (no digit, too short) is now rejected on user creation
+        mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"weak","email":"weak@polco.example","password":"onlyletters"}""")
+                        .with(jwtForTenant("polco", "admin", "identity:users:write")))
+                .andExpect(status().isBadRequest());
+
+        // a compliant password succeeds
+        mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"strong","email":"strong@polco.example","password":"Str0ngPassw0rd"}""")
+                        .with(jwtForTenant("polco", "admin", "identity:users:write")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void federated_provisioning_is_find_or_create_by_email_and_scope_gated() throws Exception {
         String body = """
                 {"tenantId":"fed","email":"jane@fed.example","username":"jane"}""";

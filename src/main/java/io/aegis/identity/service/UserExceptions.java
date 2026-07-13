@@ -30,4 +30,11 @@ public final class UserExceptions {
             super(message);
         }
     }
+
+    /** A chosen password does not satisfy the tenant's password policy. */
+    public static class PasswordPolicyException extends RuntimeException {
+        public PasswordPolicyException(String message) {
+            super(message);
+        }
+    }
 }
