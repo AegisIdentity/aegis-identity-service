@@ -29,6 +29,12 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // public onboarding — a brand-new organization has no token yet
                         .requestMatchers(HttpMethod.POST, "/api/v1/onboarding").permitAll()
+                        // public self-service sign-up — a tenant's customer with no token; the service
+                        // itself gates this on the tenant having opted in (default: closed)
+                        .requestMatchers(HttpMethod.POST, "/api/v1/signup").permitAll()
+                        // tenant admin toggles/reads their own self-service sign-up policy
+                        .requestMatchers("/api/v1/signup-policy")
+                        .hasAuthority("SCOPE_tenant:admin")
                         // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")

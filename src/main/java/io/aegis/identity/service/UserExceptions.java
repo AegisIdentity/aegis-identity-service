@@ -19,4 +19,15 @@ public final class UserExceptions {
             super(message);
         }
     }
+
+    /**
+     * Self-service sign-up is not available for the requested organization — either it does not exist
+     * or it has not enabled self-registration. Deliberately indistinguishable to avoid revealing which
+     * organizations exist (enumeration).
+     */
+    public static class SignupNotAvailableException extends RuntimeException {
+        public SignupNotAvailableException(String message) {
+            super(message);
+        }
+    }
 }

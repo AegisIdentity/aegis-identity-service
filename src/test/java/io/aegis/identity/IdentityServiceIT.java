@@ -7,6 +7,7 @@ import static org.springframework.security.test.web.servlet.setup.SecurityMockMv
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -211,5 +212,61 @@ class IdentityServiceIT {
                         {"organizationName":"Acme","tenantSlug":"acme","adminUsername":"other",
                          "adminEmail":"other@acme.example","adminPassword":"Sup3rSecret!"}"""))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void self_service_signup_is_closed_by_default_and_opens_after_admin_opts_in() throws Exception {
+        String signup = """
+                {"tenantSlug":"signupco","username":"cust1","email":"cust1@x.example","password":"Sup3rSecret!"}""";
+
+        // Closed by default: the tenant has not opted in, so public sign-up is refused.
+        mockMvc.perform(post("/api/v1/signup").contentType(MediaType.APPLICATION_JSON).content(signup))
+                .andExpect(status().isForbidden());
+
+        // The policy endpoint is scope-gated: no token -> 401, wrong scope -> 403.
+        mockMvc.perform(get("/api/v1/signup-policy")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/signup-policy")
+                        .with(jwtForTenant("signupco", "admin", "identity:users:read")))
+                .andExpect(status().isForbidden());
+
+        // The tenant admin opts in (tenant taken from the token, not the request).
+        mockMvc.perform(put("/api/v1/signup-policy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}")
+                        .with(jwtForTenant("signupco", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenant").value("signupco"))
+                .andExpect(jsonPath("$.signupEnabled").value(true));
+
+        // Now a customer can self-register, and then authenticate.
+        mockMvc.perform(post("/api/v1/signup").contentType(MediaType.APPLICATION_JSON).content(signup))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.tenant").value("signupco"))
+                .andExpect(jsonPath("$.username").value("cust1"));
+        assertThat(userService.authenticate("signupco", "cust1", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.SUCCESS);
+    }
+
+    @Test
+    void signup_does_not_reveal_whether_an_org_exists_and_is_per_tenant() throws Exception {
+        // "otherco" exists (has a user) but has NOT opted in; "ghostco" does not exist at all.
+        userService.createUser("otherco", "someone", "someone@x.example", "Sup3rSecret!");
+        String existingButClosed = """
+                {"tenantSlug":"otherco","username":"x","email":"x@x.example","password":"Sup3rSecret!"}""";
+        String unknownOrg = """
+                {"tenantSlug":"ghostco","username":"x","email":"x@x.example","password":"Sup3rSecret!"}""";
+
+        // Both indistinguishable (403): a closed tenant and a non-existent one look the same.
+        mockMvc.perform(post("/api/v1/signup").contentType(MediaType.APPLICATION_JSON).content(existingButClosed))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/signup").contentType(MediaType.APPLICATION_JSON).content(unknownOrg))
+                .andExpect(status().isForbidden());
+
+        // An admin enabling sign-up for their own tenant does not open it for another tenant.
+        mockMvc.perform(put("/api/v1/signup-policy").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\":true}")
+                        .with(jwtForTenant("enabledco", "admin", "tenant:admin")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/signup").contentType(MediaType.APPLICATION_JSON).content(existingButClosed))
+                .andExpect(status().isForbidden());
     }
 }
