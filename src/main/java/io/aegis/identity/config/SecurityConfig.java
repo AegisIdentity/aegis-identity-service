@@ -27,6 +27,8 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // public onboarding — a brand-new organization has no token yet
+                        .requestMatchers(HttpMethod.POST, "/api/v1/onboarding").permitAll()
                         // users
                         .requestMatchers(HttpMethod.POST, "/api/v1/users:authenticate")
                         .hasAuthority("SCOPE_identity:users:authenticate")

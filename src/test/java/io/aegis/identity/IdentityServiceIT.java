@@ -189,4 +189,27 @@ class IdentityServiceIT {
         // unauthenticated is denied
         mockMvc.perform(get("/api/v1/groups")).andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void onboarding_bootstraps_a_new_orgs_first_admin_and_is_idempotent() throws Exception {
+        String body = """
+                {"organizationName":"Acme Inc","tenantSlug":"acme","adminUsername":"admin",
+                 "adminEmail":"admin@acme.example","adminPassword":"Sup3rSecret!"}""";
+
+        // public — no token needed for a brand-new org
+        mockMvc.perform(post("/api/v1/onboarding").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.tenant").value("acme"))
+                .andExpect(jsonPath("$.adminUsername").value("admin"));
+
+        // the new admin can now authenticate within that tenant
+        assertThat(userService.authenticate("acme", "admin", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.SUCCESS);
+
+        // onboarding the same org again is rejected (it already has users)
+        mockMvc.perform(post("/api/v1/onboarding").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"organizationName":"Acme","tenantSlug":"acme","adminUsername":"other",
+                         "adminEmail":"other@acme.example","adminPassword":"Sup3rSecret!"}"""))
+                .andExpect(status().isConflict());
+    }
 }

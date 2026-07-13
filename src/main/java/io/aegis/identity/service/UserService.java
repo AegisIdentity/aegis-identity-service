@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,25 @@ public class UserService {
         this.hasher = hasher;
         this.lockThreshold = lockThreshold;
         this.lockDuration = lockDuration;
+    }
+
+    private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]{0,62}$");
+
+    /**
+     * Bootstraps a new organization's first admin user. Public onboarding path: allowed only when the
+     * tenant has no users yet, so it can't hijack an existing organization. (Production hardens this
+     * further with an email-verified signup token + rate limiting.)
+     */
+    @Transactional
+    public AppUser onboardTenant(String tenantSlug, String username, String email, String rawPassword) {
+        if (tenantSlug == null || !SLUG.matcher(tenantSlug).matches()) {
+            throw new IllegalArgumentException("organization must be a lowercase DNS-safe slug");
+        }
+        if (!users.findByTenantIdOrderByUsername(tenantSlug).isEmpty()) {
+            throw new UserExceptions.DuplicateUserException(
+                    "organization already exists; onboarding is only for a new organization");
+        }
+        return createUser(tenantSlug, username, email, rawPassword);
     }
 
     @Transactional
