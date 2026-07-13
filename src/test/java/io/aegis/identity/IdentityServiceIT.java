@@ -1,0 +1,124 @@
+package io.aegis.identity;
+
+import static io.aegis.commons.testing.AegisJwtTest.jwtForTenant;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import io.aegis.identity.domain.AppUser;
+import io.aegis.identity.service.AuthOutcome;
+import io.aegis.identity.service.UserExceptions.UserNotFoundException;
+import io.aegis.identity.service.UserService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+/**
+ * Integration tests for identity-service against real Postgres. Covers the security-critical
+ * behaviours: tenant isolation, Argon2 verification, lockout, and scope-based authorization.
+ */
+@SpringBootTest
+@Import(IdentityTestConfig.class)
+class IdentityServiceIT {
+
+    @Autowired
+    WebApplicationContext context;
+    @Autowired
+    UserService userService;
+
+    MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders.webAppContextSetup(context).apply(springSecurity()).build();
+    }
+
+    // ---- Service-level: tenant isolation + credential verification + lockout ----
+
+    @Test
+    void a_user_in_one_tenant_is_invisible_to_another_tenant() {
+        AppUser created = userService.createUser("tenant-a", "alice", "alice@a.example", "Sup3rSecret!");
+        // Same id, different tenant -> not found (cross-tenant read is denied by construction).
+        assertThatThrownBy(() -> userService.getUser("tenant-b", created.getId()))
+                .isInstanceOf(UserNotFoundException.class);
+        // Correct tenant -> found.
+        assertThat(userService.getUser("tenant-a", created.getId()).getUsername()).isEqualTo("alice");
+    }
+
+    @Test
+    void authenticate_succeeds_with_correct_password_and_fails_with_wrong() {
+        userService.createUser("tenant-a", "bob", "bob@a.example", "Sup3rSecret!");
+        assertThat(userService.authenticate("tenant-a", "bob", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.SUCCESS);
+        assertThat(userService.authenticate("tenant-a", "bob", "nope").outcome())
+                .isEqualTo(AuthOutcome.BAD_CREDENTIALS);
+    }
+
+    @Test
+    void unknown_username_returns_bad_credentials_not_a_distinct_error() {
+        assertThat(userService.authenticate("tenant-a", "ghost", "whatever").outcome())
+                .isEqualTo(AuthOutcome.BAD_CREDENTIALS);
+    }
+
+    @Test
+    void account_locks_after_five_consecutive_failures() {
+        userService.createUser("tenant-a", "carol", "carol@a.example", "Sup3rSecret!");
+        for (int i = 0; i < 4; i++) {
+            assertThat(userService.authenticate("tenant-a", "carol", "wrong").outcome())
+                    .isEqualTo(AuthOutcome.BAD_CREDENTIALS);
+        }
+        // 5th failure trips the lock.
+        assertThat(userService.authenticate("tenant-a", "carol", "wrong").outcome())
+                .isEqualTo(AuthOutcome.LOCKED);
+        // Even the correct password is now refused while locked.
+        assertThat(userService.authenticate("tenant-a", "carol", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.LOCKED);
+    }
+
+    // ---- HTTP-level: scope-based authorization ----
+
+    @Test
+    void create_user_requires_write_scope() throws Exception {
+        String body = """
+                {"username":"dave","email":"dave@a.example","password":"Sup3rSecret!"}""";
+
+        // No token -> 401.
+        mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+
+        // Read scope only -> 403.
+        mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:read")))
+                .andExpect(status().isForbidden());
+
+        // Write scope -> 201.
+        mockMvc.perform(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("tenant-a", "svc", "identity:users:write")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.username").value("dave"))
+                .andExpect(jsonPath("$.tenantId").value("tenant-a"));
+    }
+
+    @Test
+    void authenticate_endpoint_requires_authenticate_scope_and_verifies() throws Exception {
+        userService.createUser("tenant-a", "erin", "erin@a.example", "Sup3rSecret!");
+        String body = """
+                {"tenantId":"tenant-a","username":"erin","password":"Sup3rSecret!"}""";
+
+        mockMvc.perform(post("/api/v1/users:authenticate")
+                        .contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("tenant-a", "authz-server", "identity:users:authenticate")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("SUCCESS"));
+    }
+}

@@ -1,0 +1,39 @@
+server:
+  port: 9102
+
+spring:
+  application:
+    name: aegis-identity-service
+  datasource:
+    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/aegis_identity}
+    username: ${POSTGRES_USER:aegis}
+    password: ${POSTGRES_PASSWORD:dev-only-change-me}
+  jpa:
+    hibernate:
+      # Dev/test convenience. Production uses versioned migrations (Flyway) with ddl-auto=validate.
+      ddl-auto: update
+    open-in-view: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Tokens are validated against the authorization-server's per-tenant issuer JWKS.
+          issuer-uri: ${AEGIS_ISSUER:http://localhost:9000}
+
+aegis:
+  identity:
+    lockout:
+      threshold: 5
+      duration: PT15M
+  cors:
+    allowed-origins: ${AEGIS_CORS_ORIGINS:https://app.aegis.local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
