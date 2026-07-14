@@ -47,6 +47,12 @@ public final class UserDtos {
             @Size(max = 128) String username) {
     }
 
-    public record AuthenticateResponse(AuthOutcome outcome, UUID userId) {
+    /**
+     * Credential-verification result for the authorization-server. {@code outcome} and {@code userId}
+     * are the pre-existing contract; {@code mfaRequired} is added so the AS can enforce step-up at login.
+     * It reflects the authenticated tenant's effective auth policy and is only meaningful on SUCCESS
+     * (false/harmless otherwise, since the AS only reads it on SUCCESS).
+     */
+    public record AuthenticateResponse(AuthOutcome outcome, UUID userId, boolean mfaRequired) {
     }
 }

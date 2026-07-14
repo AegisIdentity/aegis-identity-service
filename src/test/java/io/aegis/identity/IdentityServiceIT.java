@@ -125,6 +125,40 @@ class IdentityServiceIT {
     }
 
     @Test
+    void authenticate_reports_the_tenants_mfa_requirement_so_the_as_can_step_up() throws Exception {
+        // Default policy: MFA not required -> a successful authenticate returns mfaRequired=false.
+        userService.createUser("mfaco", "gwen", "gwen@mfaco.example", "Sup3rSecret!");
+        String body = """
+                {"tenantId":"mfaco","username":"gwen","password":"Sup3rSecret!"}""";
+        mockMvc.perform(post("/api/v1/users:authenticate")
+                        .contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("mfaco", "authz-server", "identity:users:authenticate")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("SUCCESS"))
+                .andExpect(jsonPath("$.mfaRequired").value(false));
+
+        // A tenant admin turns MFA on via the auth-policy endpoint.
+        mockMvc.perform(put("/api/v1/auth-policy").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"passwordMinLength":8,"passwordRequireUppercase":false,
+                                 "passwordRequireLowercase":false,"passwordRequireDigit":false,
+                                 "passwordRequireSymbol":false,"lockoutThreshold":5,
+                                 "lockoutDurationMinutes":15,"mfaRequired":true,"sessionTtlMinutes":60}""")
+                        .with(jwtForTenant("mfaco", "admin", "tenant:admin")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.mfaRequired").value(true));
+
+        // Now a successful authenticate for a user in that tenant reports mfaRequired=true.
+        mockMvc.perform(post("/api/v1/users:authenticate")
+                        .contentType(MediaType.APPLICATION_JSON).content(body)
+                        .with(jwtForTenant("mfaco", "authz-server", "identity:users:authenticate")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("SUCCESS"))
+                .andExpect(jsonPath("$.userId").isNotEmpty())
+                .andExpect(jsonPath("$.mfaRequired").value(true));
+    }
+
+    @Test
     void users_can_be_listed_disabled_enabled_and_deleted() throws Exception {
         var user = userService.createUser("tenant-a", "frank", "frank@a.example", "Sup3rSecret!");
 

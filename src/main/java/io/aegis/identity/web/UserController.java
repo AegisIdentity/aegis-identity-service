@@ -2,6 +2,7 @@ package io.aegis.identity.web;
 
 import io.aegis.identity.domain.AppUser;
 import io.aegis.identity.domain.UserStatus;
+import io.aegis.identity.service.AuthPolicyService;
 import io.aegis.identity.service.AuthResult;
 import io.aegis.identity.service.UserService;
 import io.aegis.identity.web.UserDtos.AuthenticateRequest;
@@ -35,9 +36,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class UserController {
 
     private final UserService userService;
+    private final AuthPolicyService authPolicyService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, AuthPolicyService authPolicyService) {
         this.userService = userService;
+        this.authPolicyService = authPolicyService;
     }
 
     @PostMapping("/api/v1/users")
@@ -96,7 +99,9 @@ public class UserController {
     public AuthenticateResponse authenticate(@Valid @RequestBody AuthenticateRequest request) {
         AuthResult result = userService.authenticate(request.tenantId(), request.username(),
                 request.password());
-        return new AuthenticateResponse(result.outcome(), result.userId());
+        // Surface the tenant's MFA requirement so the authorization-server can enforce step-up at login.
+        boolean mfaRequired = authPolicyService.effectivePolicy(request.tenantId()).isMfaRequired();
+        return new AuthenticateResponse(result.outcome(), result.userId(), mfaRequired);
     }
 
     /** JIT provisioning for a federated login (find-or-create by email). Called by the authorization-server;
