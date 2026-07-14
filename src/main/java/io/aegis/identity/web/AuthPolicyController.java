@@ -27,17 +27,19 @@ public class AuthPolicyController {
         this.service = service;
     }
 
+    private static final java.util.Set<String> ALLOWED_MFA_METHODS = java.util.Set.of("TOTP", "WEBAUTHN");
+
     public record PolicyView(
             int passwordMinLength, boolean passwordRequireUppercase, boolean passwordRequireLowercase,
             boolean passwordRequireDigit, boolean passwordRequireSymbol,
             int lockoutThreshold, int lockoutDurationMinutes,
-            boolean mfaRequired, int sessionTtlMinutes) {
+            boolean mfaRequired, java.util.List<String> mfaMethods, int sessionTtlMinutes) {
 
         static PolicyView from(AuthPolicy p) {
             return new PolicyView(p.getPasswordMinLength(), p.isPasswordRequireUppercase(),
                     p.isPasswordRequireLowercase(), p.isPasswordRequireDigit(), p.isPasswordRequireSymbol(),
                     p.getLockoutThreshold(), p.getLockoutDurationMinutes(),
-                    p.isMfaRequired(), p.getSessionTtlMinutes());
+                    p.isMfaRequired(), p.getMfaMethods(), p.getSessionTtlMinutes());
         }
     }
 
@@ -48,6 +50,7 @@ public class AuthPolicyController {
             @Min(1) @Max(100) int lockoutThreshold,
             @Min(1) @Max(1440) int lockoutDurationMinutes,
             boolean mfaRequired,
+            java.util.List<String> mfaMethods,
             @Min(5) @Max(1440) int sessionTtlMinutes) {
     }
 
@@ -68,6 +71,12 @@ public class AuthPolicyController {
         incoming.setLockoutThreshold(body.lockoutThreshold());
         incoming.setLockoutDurationMinutes(body.lockoutDurationMinutes());
         incoming.setMfaRequired(body.mfaRequired());
+        // Keep only recognised method identifiers; setMfaMethods defaults to all when the result is empty.
+        java.util.List<String> methods = body.mfaMethods() == null ? java.util.List.of()
+                : body.mfaMethods().stream()
+                        .map(m -> m == null ? "" : m.trim().toUpperCase(java.util.Locale.ROOT))
+                        .filter(ALLOWED_MFA_METHODS::contains).distinct().toList();
+        incoming.setMfaMethods(methods);
         incoming.setSessionTtlMinutes(body.sessionTtlMinutes());
         return PolicyView.from(service.update(tenant, incoming));
     }

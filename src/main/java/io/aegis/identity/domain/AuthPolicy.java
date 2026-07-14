@@ -44,8 +44,29 @@ public class AuthPolicy {
     @Column(name = "mfa_required", nullable = false)
     private boolean mfaRequired = false;
 
+    /**
+     * Which factor types satisfy the MFA requirement, CSV of {@code TOTP} / {@code WEBAUTHN}. Default is
+     * both (any enrolled factor counts). Nullable so {@code ddl-auto=update} can add it to an existing,
+     * populated {@code auth_policy} table (Postgres rejects a NOT NULL column with no default there);
+     * {@link #getMfaMethods()} treats null/blank as "any". Field-access persistence — the List accessors
+     * below are helpers for the API, not mapped properties.
+     */
+    @Column(name = "mfa_methods", length = 64)
+    private String mfaMethods = "TOTP,WEBAUTHN";
+
     @Column(name = "session_ttl_minutes", nullable = false)
     private int sessionTtlMinutes = 60;
+
+    public java.util.List<String> getMfaMethods() {
+        return (mfaMethods == null || mfaMethods.isBlank())
+                ? java.util.List.of()
+                : java.util.Arrays.stream(mfaMethods.split(",")).map(String::trim)
+                        .filter(s -> !s.isEmpty()).toList();
+    }
+
+    public void setMfaMethods(java.util.List<String> methods) {
+        this.mfaMethods = (methods == null || methods.isEmpty()) ? "TOTP,WEBAUTHN" : String.join(",", methods);
+    }
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();

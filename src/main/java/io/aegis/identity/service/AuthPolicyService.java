@@ -40,6 +40,7 @@ public class AuthPolicyService {
         policy.setLockoutThreshold(clamp(incoming.getLockoutThreshold(), 1, 100));
         policy.setLockoutDurationMinutes(clamp(incoming.getLockoutDurationMinutes(), 1, 1440));
         policy.setMfaRequired(incoming.isMfaRequired());
+        policy.setMfaMethods(incoming.getMfaMethods());
         policy.setSessionTtlMinutes(clamp(incoming.getSessionTtlMinutes(), 5, 1440));
         policy.touch();
         AuthPolicy saved = policies.save(policy);
