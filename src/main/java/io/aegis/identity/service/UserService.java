@@ -32,31 +32,72 @@ public class UserService {
     private final AuthPolicyService authPolicyService;
     private final AuditService auditService;
 
+    /**
+     * A precomputed valid Argon2id hash of a random value (M-core-1). On the username-not-found path we
+     * verify the supplied password against this dummy so the request performs the same slow Argon2id
+     * work as the found path — making unknown-user and wrong-password indistinguishable by latency
+     * (anti-enumeration). Computed once at construction so it is a stable constant for the JVM lifetime.
+     */
+    private final String dummyPasswordHash;
+
     public UserService(AppUserRepository users, PasswordHasher hasher, AuthPolicyService authPolicyService,
                        AuditService auditService) {
         this.users = users;
         this.hasher = hasher;
         this.authPolicyService = authPolicyService;
         this.auditService = auditService;
+        this.dummyPasswordHash = hasher.hash("aegis-timing-guard:" + UUID.randomUUID());
     }
 
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]{0,62}$");
 
     /**
      * Bootstraps a new organization's first admin user. Public onboarding path: allowed only when the
-     * tenant has no users yet, so it can't hijack an existing organization. (Production hardens this
-     * further with an email-verified signup token + rate limiting.)
+     * tenant has no users yet, so it can't hijack an existing organization.
+     *
+     * <p>M-core-2: this method is reached from the public, unauthenticated {@code POST /api/v1/onboarding}
+     * endpoint. The status/body oracle is closed in the controller (neutral 202 either way). This method
+     * closes the residual <em>timing</em> oracle: the new-org path runs a slow Argon2id hash (inside
+     * {@link #createUser}), while the existing-org path would otherwise throw immediately with no hashing —
+     * so an attacker could time the response to learn whether an org/slug exists. We equalize the work by
+     * running the same Argon2id verification against the dummy hash on every duplicate path (mirrors the
+     * M-core-1 anti-enumeration guard in {@link #authenticate}). The try/catch guarantees the hash runs no
+     * matter where the {@link DuplicateUserException} is raised (org-already-exists here, or a
+     * username/email collision inside {@code createUser}), so all outcomes cost the same wall-clock time.
+     *
+     * <p>Note: the new-org path also runs {@link AuthPolicyService#validatePassword} inside
+     * {@code createUser}, which the existing-org path never reaches. This is NOT an oracle for a
+     * genuinely-new org: such an org has no stored policy row (a row can only be written by an
+     * authenticated admin, which requires a pre-existing user), so it falls back to the default policy
+     * — length ≥ 8 with no complexity rules — which is exactly the controller's {@code @Size(min=8)}
+     * bean-validation constraint. Any password that reaches this method has therefore already satisfied
+     * the default policy, so {@code validatePassword} cannot diverge here. (The sole residual is a stale
+     * strict policy row on a slug whose users were all later deleted — not attacker-controllable, and
+     * such a slug is not a "fresh" org anyway; left as accepted residual.)
+     *
+     * <p>TODO(security) M-core-2: the fuller defense-in-depth is rate limiting / CAPTCHA on this public
+     * endpoint plus an email-verified onboarding token so an unauthenticated caller cannot probe org
+     * existence at scale. No rate-limit hook exists in this service yet — this change closes only the
+     * timing oracle; the throttle + verified-token remain as follow-up hardening.
      */
     @Transactional
     public AppUser onboardTenant(String tenantSlug, String username, String email, String rawPassword) {
         if (tenantSlug == null || !SLUG.matcher(tenantSlug).matches()) {
             throw new IllegalArgumentException("organization must be a lowercase DNS-safe slug");
         }
-        if (!users.findByTenantIdOrderByUsername(tenantSlug).isEmpty()) {
-            throw new UserExceptions.DuplicateUserException(
-                    "organization already exists; onboarding is only for a new organization");
+        try {
+            if (!users.findByTenantIdOrderByUsername(tenantSlug).isEmpty()) {
+                throw new UserExceptions.DuplicateUserException(
+                        "organization already exists; onboarding is only for a new organization");
+            }
+            return createUser(tenantSlug, username, email, rawPassword);
+        } catch (DuplicateUserException duplicate) {
+            // Pay the same Argon2id cost as the create path before propagating, so the existing-org
+            // (and username/email-collision) path is indistinguishable from a fresh org by latency.
+            // The result is deliberately discarded — it is only here to burn the equivalent CPU/memory.
+            hasher.matches(rawPassword, dummyPasswordHash);
+            throw duplicate;
         }
-        return createUser(tenantSlug, username, email, rawPassword);
     }
 
     /**
@@ -206,6 +247,10 @@ public class UserService {
         Instant now = Instant.now();
         var maybeUser = users.findByTenantIdAndUsername(tenantId, username);
         if (maybeUser.isEmpty()) {
+            // M-core-1: run the same Argon2id verification against a dummy hash and discard the result,
+            // so an unknown username costs the same wall-clock time as a wrong password (no enumeration
+            // by timing). The outcome is deliberately ignored — it is always false.
+            hasher.matches(rawPassword, dummyPasswordHash);
             auditService.record(tenantId, username, "AUTH_FAILURE", username, "bad credentials");
             return AuthResult.of(AuthOutcome.BAD_CREDENTIALS);
         }

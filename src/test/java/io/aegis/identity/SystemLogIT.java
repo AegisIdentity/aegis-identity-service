@@ -21,6 +21,7 @@ import org.springframework.web.context.WebApplicationContext;
  * tenant-scoped from the token — an admin only ever sees their own organization's events.
  */
 @SpringBootTest
+@org.springframework.test.context.ActiveProfiles("dev") // dev profile: ddl-auto=update creates the schema; dev password fallback
 @Import(IdentityTestConfig.class)
 class SystemLogIT {
 

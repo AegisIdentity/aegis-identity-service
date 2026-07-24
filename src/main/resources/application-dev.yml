@@ -1,0 +1,16 @@
+# Dev-profile overrides. Activate with SPRING_PROFILES_ACTIVE=dev (local dev, docker-compose, tests).
+# These values apply ONLY under the dev profile and never load in stage/prod, so the known dev
+# credentials / convenience settings here can never ship to a real deployment (H2/M-core-5/M-core-6).
+spring:
+  datasource:
+    # Dev-only fallback so a bare `mvn`/local run works without exporting POSTGRES_PASSWORD.
+    password: ${POSTGRES_PASSWORD:dev-only-change-me}
+  jpa:
+    hibernate:
+      # Dev convenience: let Hibernate create/update the schema (prod uses validate + Flyway).
+      ddl-auto: update
+
+aegis:
+  identity:
+    # Opt-in for the dev admin seeder (DevDataSeeder is @Profile("dev") + matchIfMissing=false).
+    seed-dev-admin: true

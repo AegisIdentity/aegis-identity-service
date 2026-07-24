@@ -28,6 +28,7 @@ import org.springframework.web.context.WebApplicationContext;
  * the current-password / policy checks.
  */
 @SpringBootTest
+@org.springframework.test.context.ActiveProfiles("dev") // dev profile: ddl-auto=update creates the schema; dev password fallback
 @Import(IdentityTestConfig.class)
 class ChangePasswordIT {
 

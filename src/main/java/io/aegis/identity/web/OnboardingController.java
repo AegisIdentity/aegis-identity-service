@@ -1,6 +1,6 @@
 package io.aegis.identity.web;
 
-import io.aegis.identity.domain.AppUser;
+import io.aegis.identity.service.UserExceptions.DuplicateUserException;
 import io.aegis.identity.service.UserService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -39,9 +39,17 @@ public class OnboardingController {
 
     @PostMapping("/api/v1/onboarding")
     public ResponseEntity<OnboardResponse> onboard(@Valid @RequestBody OnboardRequest request) {
-        AppUser admin = userService.onboardTenant(
-                request.tenantSlug(), request.adminUsername(), request.adminEmail(), request.adminPassword());
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(new OnboardResponse(admin.getTenantId(), admin.getUsername()));
+        // M-core-2: this endpoint is public and unauthenticated, so it must not become a tenant-existence
+        // oracle. Whether or not the organization already exists, we return the SAME neutral 202 Accepted
+        // with the caller's own submitted values echoed back — an existing org is silently NOT modified
+        // (no hijack), and the caller cannot distinguish "created" from "already exists" by status/body.
+        try {
+            userService.onboardTenant(
+                    request.tenantSlug(), request.adminUsername(), request.adminEmail(), request.adminPassword());
+        } catch (DuplicateUserException alreadyExists) {
+            // Neutral: do not reveal that the organization (or an admin within it) already exists.
+        }
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(new OnboardResponse(request.tenantSlug(), request.adminUsername()));
     }
 }

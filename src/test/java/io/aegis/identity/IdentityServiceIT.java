@@ -30,6 +30,7 @@ import org.springframework.web.context.WebApplicationContext;
  * behaviours: tenant isolation, Argon2 verification, lockout, and scope-based authorization.
  */
 @SpringBootTest
+@org.springframework.test.context.ActiveProfiles("dev") // dev profile: ddl-auto=update creates the schema; dev password fallback
 @Import(IdentityTestConfig.class)
 class IdentityServiceIT {
 
@@ -231,9 +232,10 @@ class IdentityServiceIT {
                 {"organizationName":"Acme Inc","tenantSlug":"acme","adminUsername":"admin",
                  "adminEmail":"admin@acme.example","adminPassword":"Sup3rSecret!"}""";
 
-        // public — no token needed for a brand-new org
+        // public — no token needed for a brand-new org. Neutral 202 Accepted (M-core-2: no
+        // existence oracle) echoing the caller's submitted values.
         mockMvc.perform(post("/api/v1/onboarding").contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isCreated())
+                .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.tenant").value("acme"))
                 .andExpect(jsonPath("$.adminUsername").value("admin"));
 
@@ -241,11 +243,19 @@ class IdentityServiceIT {
         assertThat(userService.authenticate("acme", "admin", "Sup3rSecret!").outcome())
                 .isEqualTo(AuthOutcome.SUCCESS);
 
-        // onboarding the same org again is rejected (it already has users)
+        // M-core-2: onboarding the same org again returns the SAME neutral 202 (not a 409), so an
+        // unauthenticated caller cannot distinguish an existing org from a fresh one. The existing org
+        // is silently NOT modified — the original admin still authenticates, the squatter's creds do not.
         mockMvc.perform(post("/api/v1/onboarding").contentType(MediaType.APPLICATION_JSON).content("""
                         {"organizationName":"Acme","tenantSlug":"acme","adminUsername":"other",
                          "adminEmail":"other@acme.example","adminPassword":"Sup3rSecret!"}"""))
-                .andExpect(status().isConflict());
+                .andExpect(status().isAccepted());
+
+        // the squatting attempt did not overwrite anything: the new creds do not work, the original do
+        assertThat(userService.authenticate("acme", "other", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.BAD_CREDENTIALS);
+        assertThat(userService.authenticate("acme", "admin", "Sup3rSecret!").outcome())
+                .isEqualTo(AuthOutcome.SUCCESS);
     }
 
     @Test

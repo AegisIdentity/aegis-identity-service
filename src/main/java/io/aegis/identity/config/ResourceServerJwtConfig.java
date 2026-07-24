@@ -34,12 +34,38 @@ public class ResourceServerJwtConfig {
     public JwtDecoder jwtDecoder(
             @Value("${aegis.jwt.jwk-set-uri:http://localhost:9000/oauth2/jwks}") String jwkSetUri,
             @Value("${aegis.jwt.accepted-issuers:http://localhost:9000,http://authorization-server:9000}")
-            List<String> acceptedIssuers) {
+            List<String> acceptedIssuers,
+            @Value("${aegis.jwt.expected-audience:}") String expectedAudience) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
         decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                 new JwtTimestampValidator(),
-                issuerAllowlistValidator(List.copyOf(acceptedIssuers))));
+                issuerAllowlistValidator(List.copyOf(acceptedIssuers)),
+                audienceValidator(expectedAudience)));
         return decoder;
+    }
+
+    /**
+     * L-core-3: audience (aud) validation, defense-in-depth against token replay across services.
+     *
+     * <p>Driven by {@code aegis.jwt.expected-audience}. It is a <em>no-op scaffold by default</em>
+     * (empty property): the platform does not yet stamp a per-service {@code aud} — the AS emits
+     * {@code aud=aegis-internal} on service tokens and {@code aud=<client_id>} on user/tenant-app tokens
+     * (see M-edge-1) — so a fixed default would reject live internal tokens and break the login path.
+     * Once the AS mints this service's own identifier as an audience, set the property to enforce it.
+     * When set, a token must carry that value in its {@code aud}. Left lenient when unset so existing
+     * tokens (and tests, whose tokens carry no {@code aud}) continue to validate.
+     */
+    static OAuth2TokenValidator<Jwt> audienceValidator(String expectedAudience) {
+        if (expectedAudience == null || expectedAudience.isBlank()) {
+            return jwt -> OAuth2TokenValidatorResult.success();
+        }
+        return jwt -> {
+            List<String> aud = jwt.getAudience();
+            boolean ok = aud != null && aud.contains(expectedAudience);
+            return ok ? OAuth2TokenValidatorResult.success()
+                    : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token",
+                            "required audience not present: " + expectedAudience, null));
+        };
     }
 
     private static OAuth2TokenValidator<Jwt> issuerAllowlistValidator(List<String> acceptedIssuers) {

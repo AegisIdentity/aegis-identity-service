@@ -7,11 +7,15 @@ spring:
   datasource:
     url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/aegis_identity}
     username: ${POSTGRES_USER:aegis}
-    password: ${POSTGRES_PASSWORD:dev-only-change-me}
+    # M-core-6: no inline secret default — startup fails fast if POSTGRES_PASSWORD is unset outside the
+    # dev profile (the dev profile supplies a dev-only fallback in application-dev.yml).
+    password: ${POSTGRES_PASSWORD}
   jpa:
     hibernate:
-      # Dev/test convenience. Production uses versioned migrations (Flyway) with ddl-auto=validate.
-      ddl-auto: update
+      # M-core-5: prod-safe default. This is a credential store — never let Hibernate mutate its schema
+      # in prod. Production uses versioned migrations (Flyway) with validate; the dev profile overrides
+      # this to `update` (application-dev.yml) and tests request `update` explicitly.
+      ddl-auto: validate
     open-in-view: false
 aegis:
   jwt:
