@@ -75,9 +75,20 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * CORS origins. {@code CorsConfigFactory} requires https:// origins, with a dev-only escape
+     * hatch for plaintext localhost — and that escape hatch must actually be passed, or the service
+     * fails to START under the local stack, which serves the console over http://localhost.
+     * Gating it on the explicit {@code dev} profile keeps the production rule fail-closed: a
+     * stage/prod deploy that is handed an http:// origin still refuses to start rather than
+     * silently allowing a plaintext origin to read authenticated responses.
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource(
-            @Value("${aegis.cors.allowed-origins}") List<String> allowedOrigins) {
-        return CorsConfigFactory.fromAllowedOrigins(allowedOrigins);
+            @Value("${aegis.cors.allowed-origins}") List<String> allowedOrigins,
+            org.springframework.core.env.Environment environment) {
+        boolean devProfile = java.util.Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> profile.equalsIgnoreCase("dev"));
+        return CorsConfigFactory.fromAllowedOrigins(allowedOrigins, devProfile);
     }
 }
