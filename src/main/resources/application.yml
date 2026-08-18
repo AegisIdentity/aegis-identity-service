@@ -2,6 +2,14 @@ server:
   port: 9102
 
 spring:
+  kafka:
+    # Producer for the transactional-outbox relay (identity.user.* business events). Off unless a
+    # broker is configured, so unit tests boot without Kafka; the outbox just accumulates rows.
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
   flyway:
     enabled: true
     # Pre-Flyway databases already have these tables (they were created by

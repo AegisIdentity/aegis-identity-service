@@ -40,13 +40,27 @@ public class UserService {
      */
     private final String dummyPasswordHash;
 
+    /** Business topic for identity user lifecycle events (drives SCIM outbound provisioning). */
+    static final String USER_TOPIC = "aegis.identity.user";
+
+    private final io.aegis.identity.outbox.OutboxWriter outbox;
+
     public UserService(AppUserRepository users, PasswordHasher hasher, AuthPolicyService authPolicyService,
-                       AuditService auditService) {
+                       AuditService auditService, io.aegis.identity.outbox.OutboxWriter outbox) {
         this.users = users;
         this.hasher = hasher;
         this.authPolicyService = authPolicyService;
         this.auditService = auditService;
+        this.outbox = outbox;
         this.dummyPasswordHash = hasher.hash("aegis-timing-guard:" + UUID.randomUUID());
+    }
+
+    /**
+     * The identity.user lifecycle integration event. No password/credential material — a business
+     * event that downstream services (SCIM outbound) act on to provision into external apps.
+     */
+    public record UserLifecycleEvent(String eventType, String tenantId, String userId, String username,
+                                     String email, java.time.Instant occurredAt) {
     }
 
     private static final Pattern SLUG = Pattern.compile("^[a-z0-9][a-z0-9-]{0,62}$");
@@ -138,6 +152,12 @@ public class UserService {
         AppUser user = new AppUser(UUID.randomUUID(), tenantId, username, email, hasher.hash(rawPassword));
         AppUser saved = users.save(user);
         auditService.record(tenantId, "system", "USER_CREATED", username, null);
+        // Stage the business event in THIS transaction (transactional outbox), so identity.user.created
+        // cannot be lost between the DB commit and the Kafka publish. The relay delivers it to
+        // aegis.identity.user, where SCIM outbound provisioning consumes it.
+        outbox.stage("user", saved.getId().toString(), "identity.user.created", USER_TOPIC,
+                new UserLifecycleEvent("identity.user.created", tenantId, saved.getId().toString(),
+                        username, email, java.time.Instant.now()));
         return saved;
     }
 
