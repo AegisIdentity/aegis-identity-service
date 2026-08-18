@@ -1,5 +1,7 @@
 package io.aegis.identity.service;
 
+import io.aegis.commons.audit.AuditEventPublisher;
+import io.aegis.commons.audit.AuditOutcome;
 import io.aegis.identity.domain.AuditEvent;
 import io.aegis.identity.domain.AuditEventRepository;
 import java.util.List;
@@ -15,6 +17,11 @@ import org.springframework.transaction.annotation.Transactional;
  * <strong>best-effort</strong>: {@link #record} never throws, so an audit failure can never break the
  * primary operation it is describing. Reads are newest-first with a clamped page size.
  *
+ * <p>Every recorded event is <em>also</em> streamed to the shared {@link AuditEventPublisher}
+ * (structured log + Kafka), so identity's user/credential lifecycle lands in the platform-wide audit
+ * trail (the CloudTrail store), not only in this service's local table. Because the bridge lives here
+ * in {@code record}, every existing call site emits to the stream with no change of its own.
+ *
  * <p>Audit details must never carry secrets (passwords, tokens, full assertions).
  */
 @Service
@@ -26,9 +33,11 @@ public class AuditService {
     static final int MAX_LIMIT = 200;
 
     private final AuditEventRepository events;
+    private final AuditEventPublisher publisher;
 
-    public AuditService(AuditEventRepository events) {
+    public AuditService(AuditEventRepository events, AuditEventPublisher publisher) {
         this.events = events;
+        this.publisher = publisher;
     }
 
     /**
@@ -37,15 +46,44 @@ public class AuditService {
      */
     @Transactional
     public void record(String tenantId, String actor, String action, String target, String detail) {
+        if (tenantId == null || tenantId.isBlank() || action == null || action.isBlank()) {
+            return; // nothing meaningful to record; never fail the caller
+        }
+        String resolvedActor = actor == null || actor.isBlank() ? "system" : actor;
         try {
-            if (tenantId == null || tenantId.isBlank() || action == null || action.isBlank()) {
-                return; // nothing meaningful to record; never fail the caller
-            }
-            events.save(new AuditEvent(UUID.randomUUID(), tenantId,
-                    actor == null || actor.isBlank() ? "system" : actor, action, target, detail));
+            events.save(new AuditEvent(UUID.randomUUID(), tenantId, resolvedActor, action, target, detail));
         } catch (RuntimeException ex) {
             log.warn("audit write failed (action={}, tenant={}): {}", action, tenantId, ex.toString());
         }
+        // Stream to the platform-wide audit trail (log + Kafka). Best-effort and isolated from the
+        // local write above, so neither the DB nor the stream can break the caller or each other.
+        try {
+            publisher.publish(io.aegis.commons.audit.AuditEvent
+                    .of("identity", action, outcomeOf(action))
+                    .tenant(tenantId)
+                    .actor(resolvedActor)
+                    .target(target)
+                    .attribute("detail", detail)
+                    .build());
+        } catch (RuntimeException ex) {
+            log.warn("audit stream publish failed (action={}, tenant={}): {}", action, tenantId, ex.toString());
+        }
+    }
+
+    /**
+     * Infer the outcome from the action verb, since the local table encodes it in the action name
+     * ({@code AUTH_FAILURE}, {@code USER_DELETED}, ...). Failures and denials are the security-relevant
+     * ones to classify correctly; everything else is a completed action.
+     */
+    private static AuditOutcome outcomeOf(String action) {
+        String a = action.toUpperCase(java.util.Locale.ROOT);
+        if (a.contains("FAIL")) {
+            return AuditOutcome.FAILURE;
+        }
+        if (a.contains("DENY") || a.contains("DENIED")) {
+            return AuditOutcome.DENIED;
+        }
+        return AuditOutcome.SUCCESS;
     }
 
     /** Newest-first audit events for a tenant. {@code limit} defaults to 50 and is clamped to 200. */
