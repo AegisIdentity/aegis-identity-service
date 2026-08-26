@@ -47,6 +47,15 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth-policy")
                         .hasAuthority("SCOPE_tenant:admin")
                         // tenant admin reads their own system log (audit events; tenant from token)
+                        // Agent principals: managing a non-human identity is a tenant-admin
+                        // operation, since registering one creates an actor that can hold delegated
+                        // authority. Read is separated from write so a console can list agents
+                        // without being able to mint them.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/agents")
+                        .hasAnyAuthority("SCOPE_tenant:admin", "SCOPE_identity:agents:read")
+                        .requestMatchers("/api/v1/agents", "/api/v1/agents/**")
+                        .hasAnyAuthority("SCOPE_tenant:admin", "SCOPE_identity:agents:write")
+
                         .requestMatchers(HttpMethod.GET, "/api/v1/system-log")
                         .hasAuthority("SCOPE_tenant:admin")
                         // self-service password change — a user changes their OWN password; must come
