@@ -68,9 +68,9 @@ class AgentIdentityServiceTest {
     @Test
     void refuses_an_agent_with_no_owner() {
         assertThatThrownBy(() -> service.register("acme", "agent:orphan", "Orphan", null))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(AgentExceptions.AgentOwnerInvalidException.class);
         assertThatThrownBy(() -> service.register("acme", "agent:orphan", "Orphan", "  "))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(AgentExceptions.AgentOwnerInvalidException.class);
     }
 
     @Test
@@ -78,7 +78,7 @@ class AgentIdentityServiceTest {
         when(users.findByTenantIdAndUsername("acme", "ghost")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.register("acme", "agent:x", "X", "user:ghost"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(AgentExceptions.AgentOwnerInvalidException.class)
                 .hasMessageContaining("owner");
     }
 
@@ -90,7 +90,7 @@ class AgentIdentityServiceTest {
         ownerExists("globex", "alice");
 
         assertThatThrownBy(() -> service.register("acme", "agent:x", "X", "user:alice"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(AgentExceptions.AgentOwnerInvalidException.class);
     }
 
     @Test
@@ -107,7 +107,7 @@ class AgentIdentityServiceTest {
     void refuses_an_owner_with_an_unknown_principal_namespace() {
         // Fail closed on a namespace we cannot validate, rather than trusting an arbitrary string.
         assertThatThrownBy(() -> service.register("acme", "agent:x", "X", "wat:alice"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(AgentExceptions.AgentOwnerInvalidException.class);
     }
 
     @Test
@@ -116,7 +116,7 @@ class AgentIdentityServiceTest {
         when(agents.existsByTenantIdAndAgentId("acme", "agent:planner")).thenReturn(true);
 
         assertThatThrownBy(() -> service.register("acme", "agent:planner", "Planner", "user:alice"))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(AgentExceptions.DuplicateAgentException.class);
     }
 
     @Test
@@ -152,7 +152,7 @@ class AgentIdentityServiceTest {
         when(agents.findByTenantIdAndAgentId("acme", "agent:planner")).thenReturn(Optional.of(agent));
 
         assertThatThrownBy(() -> service.activate("acme", "agent:planner"))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(AgentExceptions.AgentRevokedException.class);
     }
 
     @Test

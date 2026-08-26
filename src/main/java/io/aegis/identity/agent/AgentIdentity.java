@@ -96,7 +96,7 @@ public class AgentIdentity {
      */
     public void activate() {
         if (status == AgentStatus.REVOKED) {
-            throw new IllegalStateException(
+            throw new AgentExceptions.AgentRevokedException(
                     "agent " + agentId + " is revoked; revocation is terminal — register a new agent");
         }
         this.status = AgentStatus.ACTIVE;

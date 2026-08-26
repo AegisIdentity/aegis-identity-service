@@ -3,6 +3,9 @@ package io.aegis.identity.agent;
 import io.aegis.commons.audit.AuditEvent;
 import io.aegis.commons.audit.AuditEventPublisher;
 import io.aegis.commons.audit.AuditOutcome;
+import io.aegis.identity.agent.AgentExceptions.AgentNotFoundException;
+import io.aegis.identity.agent.AgentExceptions.AgentOwnerInvalidException;
+import io.aegis.identity.agent.AgentExceptions.DuplicateAgentException;
 import io.aegis.identity.domain.AppUserRepository;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -38,7 +41,7 @@ public class AgentIdentityService {
         requireValidOwner(tenantId, ownerPrincipal);
 
         if (agents.existsByTenantIdAndAgentId(tenantId, agentId)) {
-            throw new IllegalStateException("agent already registered in this tenant: " + agentId);
+            throw new DuplicateAgentException("agent already registered in this tenant: " + agentId);
         }
 
         AgentIdentity agent = agents.save(new AgentIdentity(tenantId, agentId, displayName, ownerPrincipal));
@@ -58,20 +61,20 @@ public class AgentIdentityService {
      */
     private void requireValidOwner(String tenantId, String ownerPrincipal) {
         if (ownerPrincipal == null || ownerPrincipal.isBlank()) {
-            throw new IllegalArgumentException(
+            throw new AgentOwnerInvalidException(
                     "agent owner is required — an agent must have an accountable owner");
         }
         if (ownerPrincipal.startsWith(SERVICE_PREFIX)) {
             return;
         }
         if (!ownerPrincipal.startsWith(USER_PREFIX)) {
-            throw new IllegalArgumentException(
+            throw new AgentOwnerInvalidException(
                     "unrecognised owner principal namespace: " + ownerPrincipal
                             + " (expected " + USER_PREFIX + " or " + SERVICE_PREFIX + ")");
         }
         String username = ownerPrincipal.substring(USER_PREFIX.length());
         users.findByTenantIdAndUsername(tenantId, username).orElseThrow(() ->
-                new IllegalArgumentException(
+                new AgentOwnerInvalidException(
                         "agent owner does not exist in this tenant: " + ownerPrincipal));
     }
 
@@ -120,7 +123,7 @@ public class AgentIdentityService {
 
     private AgentIdentity require(String tenantId, String agentId) {
         return agents.findByTenantIdAndAgentId(tenantId, agentId)
-                .orElseThrow(() -> new IllegalArgumentException("unknown agent: " + agentId));
+                .orElseThrow(() -> new AgentNotFoundException("unknown agent: " + agentId));
     }
 
     private void record(String tenantId, String action, String agentId, AuditOutcome outcome,

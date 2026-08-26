@@ -17,6 +17,30 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class IdentityExceptionHandler {
 
+    @ExceptionHandler(io.aegis.identity.agent.AgentExceptions.AgentOwnerInvalidException.class)
+    public ProblemDetail handleAgentOwnerInvalid(
+            io.aegis.identity.agent.AgentExceptions.AgentOwnerInvalidException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(io.aegis.identity.agent.AgentExceptions.DuplicateAgentException.class)
+    public ProblemDetail handleDuplicateAgent(
+            io.aegis.identity.agent.AgentExceptions.DuplicateAgentException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(io.aegis.identity.agent.AgentExceptions.AgentNotFoundException.class)
+    public ProblemDetail handleAgentNotFound(
+            io.aegis.identity.agent.AgentExceptions.AgentNotFoundException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(io.aegis.identity.agent.AgentExceptions.AgentRevokedException.class)
+    public ProblemDetail handleAgentRevoked(
+            io.aegis.identity.agent.AgentExceptions.AgentRevokedException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(DuplicateUserException.class)
     public ProblemDetail handleDuplicate(DuplicateUserException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
